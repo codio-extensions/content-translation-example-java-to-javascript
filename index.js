@@ -6,7 +6,7 @@
   const systemPrompt = "System Prompt for the LLM goes here"
   
   // register(id: unique button id, name: name of button visible in Coach, function: function to call when button is clicked) 
-  codioIDE.coachBot.register("iNeedHelpButton", "I have a question", onButtonPress)
+  codioIDE.coachBot.register("iNeedHelpButton", "Translate the assignment for me please!", onButtonPress)
 
   // function called when I have a question button is pressed
   async function onButtonPress() {
