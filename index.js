@@ -13,16 +13,18 @@
     
     // let variable_name  //const variable_name     //var variable_name
     // Let's add a chapter first for the translated content
-    // let chapter_res
-    // try {
-    //     chapter_res = await window.codioIDE.guides.structure.add({
-    //         title: 'Javascript', 
-    //         type: window.codioIDE.guides.structure.ITEM_TYPES.CHAPTER
-    //     })
-    //     console.log('Chapter added ->', chapter_res) // returns added item: {id: '...', title: '...', type: '...', children: [...]}
-    // } catch (e) {
-    //     console.error(e)
-    // }
+    let chapter_res
+    try {
+        chapter_res = await window.codioIDE.guides.structure.add({
+            title: 'Javascript', 
+            type: window.codioIDE.guides.structure.ITEM_TYPES.CHAPTER
+        })
+        console.log('Chapter added ->', chapter_res) // returns added item: {id: '...', title: '...', type: '...', children: [...]}
+    } catch (e) {
+        console.error(e)
+    }
+    
+    codioIDE.coachBot.write(`Created new Chapter in Guides to add all translated pages!`)
 
     // get guides structure for page names and order
     let structure
@@ -33,6 +35,7 @@
         console.error(e)
     }
 
+    // filter out everything else and onlt keep guide elements of type: page
     const findPagesFilter = (obj) => {
         if (!obj || typeof obj !== 'object') return [];
         
@@ -47,6 +50,7 @@
 
     let guidePages = {}
 
+    // iterate through page ids of pages and fetch all page data
     for ( const element_index in pages) {
       
       // console.log("element", element)
@@ -81,7 +85,11 @@ Follow these guidelines for the translation:
 5. Ensure that explanations and comments are updated to reflect the new language's conventions and best practices.
 6. Do not add any explanations, additional comments, or extra functionality that wasn't present in the original content.
 7. If there are any portions of the code that cannot be directly translated due to language limitations, provide the closest equivalent functionality and include a comment explaining the adaptation.
-8. If there is a {Try It} button command on the page, make sure the filepath in the command starts with code/ - for eg. {Try it}(node code/<filename>.js)
+8. If there is a {Try It} button command on the page:
+    a) make sure the filepath in the command starts with code/ 
+    b) change the filename format at the end of the filepath to adhere to Javascript naming conventions
+    c) make sure the filepath is the same - the file should be in the same directory
+    d) for eg. {Try it}(node code/<filepath>/<fileName>.js)
 
 
 When handling specific elements:
@@ -131,33 +139,50 @@ Output requirements:
 
 Begin your translation now, and remember to focus solely on accurate translation without adding any extra information or functionality.
 `
+
+    const fileRenamingPrompt = `You are a helpful assistant with expertise in Javascript naming conventions.
+            Here is the filepath for a Java file:
+            <filepath> 
+            {openFilePath}
+            </filepath>. 
+            Your task is to change the filename formatting in the provided filepath as per Javascript naming conventions.
+            Also change the extension to .js. Do not change the filepath. It should still be in the same directory structure.
+            Provide the updated filepath in the <updated_filepath> tags.`
+
     // iterate through guidePages for translation
     for (const [pageIndex, pageData] of Object.entries(guidePages)) {
         console.log(`${pageIndex}: ${pageData.title}`)
         
-        let pageContent
+        // variables that may or may not be defined based on page layout
         let codeFile
+        let openFilePath
 
+        // pageData and settings that we want to translate and persist
         const pageLayout = pageData.settings.layout
+        const closeAllTabs = pageData.settings.closeAllTabs
+        const showFileTree = pageData.settings.showFileTree
+        const closeTerminalSession = pageData.settings.closeTerminalSession
+        const pageContent = pageData.content
+        let actions = pageData.settings.actions
+
         // if layout is not 1 panel, then check for open file in left panel
         if (pageLayout != "1-panel") {
 
-            const openFilePath = pageData.settings.actions[0].fileName
-            // check if open file is a .java file and not an image or anything else
+            openFilePath = pageData.settings.actions[0].fileName
+
+            // check if open file is a .java file
             if (openFilePath.endsWith(".java")) {
                 console.log("this should be the java file that's open with this page", `${pageData.settings.actions[0].fileName}`)
                 // fetch file content
-                codeFile = await codioIDE.files.getContent(filepath)
+                codeFile = await codioIDE.files.getContent(openFilePath)
             }
         }
 
-        pageContent = pageData.content
-
-        codioIDE.coachBot.write(`Translating page on ${pageData.title} at index ${pageIndex}`)
+        codioIDE.coachBot.write(`Translating page on ${pageData.title} at index ${pageIndex}... please wait...`)
         var updatedContentPrompt = contentUserPrompt.replace('{ORIGINAL_CONTENT}', pageContent)
         
         // function that takes in the userPrompt and extraction xml tag, returns the translation result
-        async function fetchTranslation(userPrompt, xml_tag) {
+        async function fetchLLMResponseXMLTagContents(userPrompt, xml_tag) {
 
             // Send the API request to the LLM with page content
             const result = await codioIDE.coachBot.ask(
@@ -178,48 +203,51 @@ Begin your translation now, and remember to focus solely on accurate translation
             return result.result.substring(startIndex, endIndex);
         }
 
-        const translatedContent = await fetchTranslation(updatedContentPrompt, "translated_content")
-        
-        console.log("translation result", translatedContent)
+        // fetch translated content
+        const translatedContent = await fetchLLMResponseXMLTagContents(updatedContentPrompt, "translated_content")
+        console.log("content translation result", translatedContent)
 
         let translatedCodeFile
 
+        // if codeFile exists, fetch translated code file
         if (codeFile) {
             var updatedCodeFilePrompt = codeFileUserPrompt.replace('{CODE_FILE}', codeFile)
-            translatedCodeFile = await fetchTranslation(updatedCodeFilePrompt, "translated_code")
+            translatedCodeFile = await fetchLLMResponseXMLTagContents(updatedCodeFilePrompt, "translated_code")
+
+            // const fileAddRes = await codioIDE.files.add(filepath, fileContents)
+            console.log("code file translation result", translatedCodeFile)
+
+            var updatedFileRenamingPrompt = fileRenamingPrompt.replace('{openFilePath}', openFilePath)
+            var updatedFileName = await fetchLLMResponseXMLTagContents(updatedFileRenamingPrompt, "updated_filepath")
+            console.log("filename translation result", updatedFileName)
         }
 
+        // add new page, with translated content, and preserve old layout and settings
         try {
+
+            if (codeFile) {
+                actions = [{type: 'file', panel: undefined, fileName: `${updatedFileName}`}]
+            }
+
             const page_res = await window.codioIDE.guides.structure.add({
-                title: `${pageName}`, 
                 type: window.codioIDE.guides.structure.ITEM_TYPES.PAGE,
-                layout: window.codioIDE.guides.structure.LAYOUT.L_2_PANELS,
-                content: `${translated_content}`,
+                title: `${pageData.title}`, 
+                content: `${translatedContent}`,
+                layout: pageLayout,
+                closeTerminalSession: closeTerminalSession,
+                closeAllTabs: closeAllTabs,
+                showFileTree: showFileTree,
+                actions: actions
             }, `${chapter_res.id}`, pageIndex+1)
-            codioIDE.coachBot.write(`${pageName} Translation complete!! `)
-            
+            codioIDE.coachBot.write(`${pageData.title} Translation complete!! 🐣`)
             console.log('add item result', page_res) // returns added item: {id: '...', title: '...', type: '...', children: [...]}
         } catch (e) {
             console.error(e)
         }
 
-
-
-
-        // get page content for content translation prompt
-
-        // get file content for code translation prompt if applicable, else pass
-        // get page settings and layout
-
-
-        // apply them to new page with translated content and code file (if applicable) and add it to the created chapter
-
     }
-
-
 //   e. Rate the translation on a scale of 1 to 5. (1 being poor and 5 being excellent.) in a <rating> tag
 //    g. Finally, provide translation rating explanations in a <rating_explanation> tag
-
     codioIDE.coachBot.showMenu()
   }
 // calling the function immediately by passing the required variables
