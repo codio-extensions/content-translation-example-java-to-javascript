@@ -86,10 +86,9 @@ Follow these guidelines for the translation:
 6. Do not add any explanations, additional comments, or extra functionality that wasn't present in the original content.
 7. If there are any portions of the code that cannot be directly translated due to language limitations, provide the closest equivalent functionality and include a comment explaining the adaptation.
 8. If there is a {Try It} button command on the page:
-    a) make sure the filepath in the command starts with code/ 
-    b) change the filename format at the end of the filepath to adhere to Javascript naming conventions
-    c) make sure the filepath is the same - the file should be in the same directory
-    d) for eg. {Try it}(node code/<filepath>/<fileName>.js)
+    - Make sure the filepath in the command starts with code/ 
+    - Change the filename formatting in the provided filepath as per Javascript naming conventions.
+    - Also change the extension to .js. Do not change the filepath. It should still be in the same directory structure.
 
 
 When handling specific elements:
@@ -145,8 +144,8 @@ Begin your translation now, and remember to focus solely on accurate translation
             <filepath> 
             {openFilePath}
             </filepath>. 
-            Your task is to change the filename formatting in the provided filepath as per Javascript naming conventions.
-            Also change the extension to .js. Do not change the filepath. It should still be in the same directory structure.
+            Your task is to change the filename formatting in the provided filepath as per Javascript file naming conventions in kebab-case.
+            Change any java specific filenames to its Javascript equivalent. Also change the extension to .js. Do not change the filepath. It should still be in the same directory structure.
             Provide the updated filepath in the <updated_filepath> tags.`
 
     // iterate through guidePages for translation
@@ -171,10 +170,12 @@ Begin your translation now, and remember to focus solely on accurate translation
             openFilePath = pageData.settings.actions[0].fileName
 
             // check if open file is a .java file
-            if (openFilePath.endsWith(".java")) {
-                console.log("this should be the java file that's open with this page", `${pageData.settings.actions[0].fileName}`)
-                // fetch file content
-                codeFile = await codioIDE.files.getContent(openFilePath)
+            if (typeof(openFilePath) != "undefined") {
+                if (openFilePath.endsWith(".java")) {
+                    console.log("this should be the java file that's open with this page", `${pageData.settings.actions[0].fileName}`)
+                    // fetch file content
+                    codeFile = await codioIDE.files.getContent(openFilePath)
+                }
             }
         }
 
@@ -195,17 +196,21 @@ Begin your translation now, and remember to focus solely on accurate translation
                 }, {stream:false, preventMenu: true}
             )
 
-            // console.log("translation result", result)
+            // console.log("API request result", result.result)
             
             const startIndex = result.result.indexOf(`<${xml_tag}>`) + `<${xml_tag}>`.length
             const endIndex = result.result.lastIndexOf(`</${xml_tag}>`);
 
-            return result.result.substring(startIndex, endIndex);
+            if (endIndex == -1) {
+                return result.result
+            } else {
+                return result.result.substring(startIndex, endIndex);
+            }
         }
 
         // fetch translated content
         const translatedContent = await fetchLLMResponseXMLTagContents(updatedContentPrompt, "translated_content")
-        console.log("content translation result", translatedContent)
+        // console.log("content translation result", translatedContent)
 
         let translatedCodeFile
 
@@ -215,12 +220,23 @@ Begin your translation now, and remember to focus solely on accurate translation
             translatedCodeFile = await fetchLLMResponseXMLTagContents(updatedCodeFilePrompt, "translated_code")
 
             // const fileAddRes = await codioIDE.files.add(filepath, fileContents)
-            console.log("code file translation result", translatedCodeFile)
+            // console.log("code file translation result", translatedCodeFile)
 
             var updatedFileRenamingPrompt = fileRenamingPrompt.replace('{openFilePath}', openFilePath)
             var updatedFileName = await fetchLLMResponseXMLTagContents(updatedFileRenamingPrompt, "updated_filepath")
-            console.log("filename translation result", updatedFileName)
+            // console.log("filename translation result", updatedFileName)
         }
+
+        const newMarkdownPage = `${translatedContent}
+        
+        // filepath/filename
+        ${updatedFileName}
+
+        // This is the content for the code file in the left panel 
+        ${translatedCodeFile}
+        
+        `
+        console.log("final page", newMarkdownPage)
 
         // add new page, with translated content, and preserve old layout and settings
         try {
@@ -232,7 +248,7 @@ Begin your translation now, and remember to focus solely on accurate translation
             const page_res = await window.codioIDE.guides.structure.add({
                 type: window.codioIDE.guides.structure.ITEM_TYPES.PAGE,
                 title: `${pageData.title}`, 
-                content: `${translatedContent}`,
+                content: `${newMarkdownPage}`,
                 layout: pageLayout,
                 closeTerminalSession: closeTerminalSession,
                 closeAllTabs: closeAllTabs,
